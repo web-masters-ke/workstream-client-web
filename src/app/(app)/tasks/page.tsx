@@ -17,6 +17,8 @@ const COLUMNS: { key: TaskStatus; label: string }[] = [
   { key: "PENDING", label: "Pending" },
   { key: "ASSIGNED", label: "Assigned" },
   { key: "IN_PROGRESS", label: "In progress" },
+  { key: "UNDER_REVIEW", label: "Under review" },
+  { key: "ON_HOLD", label: "On hold" },
   { key: "COMPLETED", label: "Completed" },
 ];
 
@@ -94,9 +96,11 @@ export default function TasksPage() {
 
   const grouped = useMemo(() => {
     const g: Record<TaskStatus, Task[]> = {
-      PENDING: [], ASSIGNED: [], IN_PROGRESS: [], COMPLETED: [], FAILED: [], CANCELLED: [],
+      PENDING: [], ASSIGNED: [], IN_PROGRESS: [], UNDER_REVIEW: [], COMPLETED: [], FAILED: [], CANCELLED: [], ON_HOLD: [],
     };
-    filtered.forEach((t) => g[t.status].push(t));
+    filtered.forEach((t) => {
+      if (g[t.status]) g[t.status].push(t);
+    });
     return g;
   }, [filtered]);
 
@@ -194,7 +198,7 @@ export default function TasksPage() {
       key: "status",
       header: "Status",
       cell: (t) => {
-        const toneMap: Record<TaskStatus, "default" | "info" | "warning" | "success" | "danger"> = { PENDING: "default", ASSIGNED: "info", IN_PROGRESS: "warning", COMPLETED: "success", FAILED: "danger", CANCELLED: "default" };
+        const toneMap: Record<TaskStatus, "default" | "info" | "warning" | "success" | "danger"> = { PENDING: "default", ASSIGNED: "info", IN_PROGRESS: "warning", UNDER_REVIEW: "info", COMPLETED: "success", FAILED: "danger", CANCELLED: "default", ON_HOLD: "warning" };
         return <Badge tone={toneMap[t.status]}>{t.status.replace("_", " ")}</Badge>;
       },
     },
@@ -300,7 +304,7 @@ export default function TasksPage() {
           <Input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="">All status</option>
-            {(["PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"] as TaskStatus[]).map((s) => <option key={s} value={s}>{s}</option>)}
+            {(["PENDING", "ASSIGNED", "IN_PROGRESS", "UNDER_REVIEW", "ON_HOLD", "COMPLETED", "FAILED", "CANCELLED"] as TaskStatus[]).map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
           </Select>
           <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
             <option value="">All agents</option>

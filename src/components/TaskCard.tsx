@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { Badge } from "./ui";
 import type { Task, TaskStatus } from "@/lib/types";
@@ -7,9 +9,11 @@ const statusTone: Record<TaskStatus, "default" | "success" | "warning" | "danger
   PENDING: "default",
   ASSIGNED: "info",
   IN_PROGRESS: "warning",
+  UNDER_REVIEW: "info",
   COMPLETED: "success",
   FAILED: "danger",
   CANCELLED: "default",
+  ON_HOLD: "warning",
 };
 
 export function TaskCard({ task }: { task: Task }) {

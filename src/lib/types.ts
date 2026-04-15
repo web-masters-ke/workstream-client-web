@@ -73,7 +73,7 @@ export interface Job {
   dueAt?: string;
 }
 
-export type TaskStatus = "PENDING" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED";
+export type TaskStatus = "PENDING" | "ASSIGNED" | "IN_PROGRESS" | "UNDER_REVIEW" | "COMPLETED" | "FAILED" | "CANCELLED" | "ON_HOLD";
 
 export interface Task {
   id: UUID;
