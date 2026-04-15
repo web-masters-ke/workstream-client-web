@@ -40,6 +40,7 @@ export default function SettingsPage() {
   const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>(
     Object.fromEntries(NOTIF_PREFS.map((p) => [p.key, p.default])),
   );
+  const [notifSaved, setNotifSaved] = useState(false);
 
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState("");
@@ -51,6 +52,12 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<"general" | "notifications" | "api" | "webhooks" | "integrations">("general");
 
   useEffect(() => {
+    // Load notification prefs from localStorage
+    try {
+      const stored = localStorage.getItem("ws-notif-prefs");
+      if (stored) setNotifPrefs(JSON.parse(stored));
+    } catch { /* ignore */ }
+
     (async () => {
       try {
         const [settings, keys, whs] = await Promise.all([
@@ -80,6 +87,14 @@ export default function SettingsPage() {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
+
+  const saveNotifPrefs = () => {
+    localStorage.setItem("ws-notif-prefs", JSON.stringify(notifPrefs));
+    // Best-effort sync to backend
+    apiPatch("/workspaces/settings", { notificationPreferences: notifPrefs }).catch(() => {});
+    setNotifSaved(true);
+    setTimeout(() => setNotifSaved(false), 2500);
+  };
 
   const createApiKey = async () => {
     if (!newKeyLabel.trim()) return;
@@ -192,7 +207,10 @@ export default function SettingsPage() {
               </label>
             ))}
           </div>
-          <Button className="mt-4" size="sm" variant="outline" onClick={() => save(new Event("submit") as unknown as FormEvent)}>Save preferences</Button>
+          <div className="mt-4 flex items-center gap-3">
+            <Button size="sm" onClick={saveNotifPrefs}>Save preferences</Button>
+            {notifSaved && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Saved ✓</span>}
+          </div>
         </Card>
       )}
 
