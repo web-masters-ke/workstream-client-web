@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { apiPost, TOKEN_KEY } from "@/lib/api";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { apiPost, setAuthToken, TOKEN_KEY } from "@/lib/api";
 
 const INDUSTRIES = [
   "Customer Support / BPO",
@@ -53,6 +54,8 @@ const PLANS = [
   },
 ] as const;
 
+type AccountType = "BUSINESS" | "AGENT";
+// Business: 4 steps. Agent: 2 steps (account → review).
 type Step = 1 | 2 | 3 | 4;
 
 interface AccountData {
@@ -65,7 +68,8 @@ interface BusinessData {
   country: string; teamSize: string; agentHiringModel: string;
 }
 
-const STEP_LABELS = ["Your account", "Your business", "Choose plan", "Review & launch"];
+const BIZ_STEP_LABELS = ["Your account", "Your business", "Choose plan", "Review & launch"];
+const AGENT_STEP_LABELS = ["Your account", "Review & join"];
 
 function Field({ label, error, action, children }: { label: string; error?: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -83,16 +87,30 @@ function Field({ label, error, action, children }: { label: string; error?: stri
 const inputCls = "w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-brand-500 dark:focus:bg-zinc-900";
 
 export default function RegisterPage() {
+  const router = useRouter();
+  const [accountType, setAccountType] = useState<AccountType>("BUSINESS");
   const [step, setStep] = useState<Step>(1);
   const [account, setAccount] = useState<AccountData>({ firstName: "", lastName: "", email: "", phone: "", password: "", confirmPassword: "" });
   const [business, setBusiness] = useState<BusinessData>({ companyName: "", industry: "Customer Support / BPO", description: "", website: "", contactEmail: "", contactPhone: "", country: "", teamSize: "1–10", agentHiringModel: "FREELANCE" });
   const [selectedPlan, setSelectedPlan] = useState<string>("growth");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+
+  // OTP state
+  const [otpPhase, setOtpPhase] = useState(false);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [savedToken, setSavedToken] = useState<string>("");
+  const [savedUser, setSavedUser] = useState<Record<string, unknown> | null>(null);
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const isBiz = accountType === "BUSINESS";
+  const maxStep: Step = isBiz ? 4 : 2;
+  const stepLabels = isBiz ? BIZ_STEP_LABELS : AGENT_STEP_LABELS;
 
   function setA(field: keyof AccountData, val: string) {
     setAccount((p) => ({ ...p, [field]: val }));
@@ -131,21 +149,44 @@ export default function RegisterPage() {
   function next() {
     setError(null);
     if (step === 1 && !validateStep1()) return;
-    if (step === 2 && !validateStep2()) return;
-    setStep((s) => (s < 4 ? (s + 1) as Step : s));
+    if (step === 2 && isBiz && !validateStep2()) return;
+    setStep((s) => (s < maxStep ? (s + 1) as Step : s));
   }
   function back() { setStep((s) => (s > 1 ? (s - 1) as Step : s)); }
+
+  function loginAndRedirect(token: string, user: Record<string, unknown>) {
+    setAuthToken(token);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ws-user", JSON.stringify(user));
+    }
+    router.push(isBiz ? "/dashboard" : "/tasks");
+  }
 
   async function submit() {
     setError(null);
     setLoading(true);
     try {
-      await apiPost("/auth/register", { email: account.email, phone: account.phone, password: account.password, firstName: account.firstName, lastName: account.lastName, role: "BUSINESS" });
-      try {
-        await apiPost("/businesses", { name: business.companyName, industry: business.industry, description: business.description, website: business.website || undefined, contactEmail: business.contactEmail, contactPhone: business.contactPhone, country: business.country || undefined, teamSize: business.teamSize, agentHiringModel: business.agentHiringModel, plan: selectedPlan });
-      } catch { /* best effort */ }
+      const res = await apiPost<{ accessToken: string; refreshToken?: string; user: Record<string, unknown> }>(
+        "/auth/register",
+        { email: account.email, phone: account.phone, password: account.password, firstName: account.firstName, lastName: account.lastName, role: accountType }
+      );
+
+      if (isBiz) {
+        try {
+          await apiPost("/businesses", { name: business.companyName, industry: business.industry, description: business.description, website: business.website || undefined, contactEmail: business.contactEmail, contactPhone: business.contactPhone, country: business.country || undefined, teamSize: business.teamSize, agentHiringModel: business.agentHiringModel, plan: selectedPlan });
+        } catch { /* best effort */ }
+      }
+
+      // Save token temporarily, send OTP, show OTP screen
+      setSavedToken(res.accessToken);
+      setSavedUser(res.user);
       if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
-      setDone(true);
+
+      try {
+        await apiPost("/auth/send-otp", { identifier: account.email, purpose: "register" });
+      } catch { /* OTP sending is best-effort */ }
+
+      setOtpPhase(true);
     } catch (err) {
       const e = err as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } }; message?: string };
       const msg = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message ?? "Registration failed";
@@ -156,28 +197,121 @@ export default function RegisterPage() {
     }
   }
 
-  if (done) {
+  function handleOtpInput(index: number, value: string) {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    const next = [...otp];
+    next[index] = digit;
+    setOtp(next);
+    setOtpError(null);
+    if (digit && index < 5) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  }
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && !otp[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    }
+  }
+
+  function handleOtpPaste(e: React.ClipboardEvent) {
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (pasted.length === 6) {
+      setOtp(pasted.split(""));
+      otpRefs.current[5]?.focus();
+    }
+  }
+
+  async function verifyOtp() {
+    const code = otp.join("");
+    if (code.length < 6) { setOtpError("Enter all 6 digits"); return; }
+    setOtpLoading(true);
+    setOtpError(null);
+    try {
+      await apiPost("/auth/verify-otp", { identifier: account.email, token: code });
+      loginAndRedirect(savedToken, savedUser!);
+    } catch {
+      setOtpError("Invalid or expired code. Try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  }
+
+  async function resendOtp() {
+    try {
+      await apiPost("/auth/send-otp", { identifier: account.email, purpose: "register" });
+      setOtpError(null);
+    } catch { /* ignore */ }
+  }
+
+  // ── OTP verification screen ──
+  if (otpPhase) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white px-6 dark:bg-zinc-950">
-        <div className="w-full max-w-md text-center">
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
-            <svg className="h-8 w-8 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+        <div className="w-full max-w-sm">
+          <div className="mb-6 flex justify-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-xl font-bold text-white">W</div>
           </div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Check your email</h2>
-          <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-            We sent a verification link to <span className="font-semibold text-zinc-800 dark:text-zinc-200">{account.email}</span>. Click the link to activate your workspace.
+          <h2 className="text-center text-2xl font-bold text-zinc-900 dark:text-zinc-50">Enter verification code</h2>
+          <p className="mt-2 text-center text-sm text-zinc-500 dark:text-zinc-400">
+            We sent a 6-digit code to{" "}
+            <span className="font-semibold text-zinc-800 dark:text-zinc-200">{account.email}</span>
           </p>
-          <Link href="/login" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-700">
-            Go to sign in
-          </Link>
+
+          <div className="mt-8 flex justify-center gap-2" onPaste={handleOtpPaste}>
+            {otp.map((digit, i) => (
+              <input
+                key={i}
+                ref={(el) => { otpRefs.current[i] = el; }}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleOtpInput(i, e.target.value)}
+                onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                className="h-12 w-11 rounded-xl border border-zinc-200 bg-zinc-50 text-center text-lg font-semibold text-zinc-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              />
+            ))}
+          </div>
+
+          {otpError && (
+            <p className="mt-3 text-center text-xs text-red-600 dark:text-red-400">{otpError}</p>
+          )}
+
+          <button
+            type="button"
+            onClick={verifyOtp}
+            disabled={otpLoading}
+            className="mt-6 w-full rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+          >
+            {otpLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Verifying…
+              </span>
+            ) : "Verify code"}
+          </button>
+
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <button type="button" onClick={resendOtp} className="text-xs text-brand-600 hover:underline dark:text-brand-400">
+              Resend code
+            </button>
+            <button
+              type="button"
+              onClick={() => loginAndRedirect(savedToken, savedUser!)}
+              className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              Continue without verification →
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  const plan = PLANS.find((p) => p.id === selectedPlan) ?? PLANS[1];
+  const plan = PLANS.find((p) => p.id === selectedPlan) ?? PLANS[2];
+  const reviewStep = isBiz ? 4 : 2;
+  const isReview = step === reviewStep;
 
   return (
     <div className="flex min-h-screen">
@@ -193,36 +327,41 @@ export default function RegisterPage() {
 
         <div>
           <h1 className="text-3xl font-bold leading-tight text-white">
-            Set up your<br />
-            <span className="text-brand-400">remote operations hub.</span>
+            {isBiz ? (
+              <>Set up your<br /><span className="text-brand-400">remote operations hub.</span></>
+            ) : (
+              <>Join as a<br /><span className="text-brand-400">remote agent.</span></>
+            )}
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-slate-400">
-            Post jobs, assign tasks to remote agents, enforce SLAs, run QA reviews, and pay out earnings — all from one place.
+            {isBiz
+              ? "Post jobs, assign tasks to remote agents, enforce SLAs, run QA reviews, and pay out earnings — all from one place."
+              : "Pick up tasks, hit your SLAs, grow your ratings, and get paid — all from one dashboard."}
           </p>
 
           {/* Step progress */}
           <div className="mt-10 space-y-4">
-            {STEP_LABELS.map((label, i) => {
+            {stepLabels.map((label, i) => {
               const s = (i + 1) as Step;
               const active = step === s;
-              const done = step > s;
+              const doneStep = step > s;
               return (
                 <div key={label} className="flex items-center gap-3">
                   <div
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all"
                     style={{
-                      background: done ? "rgb(37 99 235)" : active ? "rgba(37,99,235,0.2)" : "rgba(255,255,255,0.06)",
-                      color: done || active ? "#fff" : "rgba(255,255,255,0.3)",
+                      background: doneStep ? "rgb(37 99 235)" : active ? "rgba(37,99,235,0.2)" : "rgba(255,255,255,0.06)",
+                      color: doneStep || active ? "#fff" : "rgba(255,255,255,0.3)",
                       border: active ? "1.5px solid rgb(37 99 235 / 0.6)" : "1.5px solid transparent",
                     }}
                   >
-                    {done ? (
+                    {doneStep ? (
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
                     ) : s}
                   </div>
-                  <span className={`text-sm transition-colors ${active ? "font-semibold text-white" : done ? "text-slate-400" : "text-slate-600"}`}>
+                  <span className={`text-sm transition-colors ${active ? "font-semibold text-white" : doneStep ? "text-slate-400" : "text-slate-600"}`}>
                     {label}
                   </span>
                 </div>
@@ -230,15 +369,17 @@ export default function RegisterPage() {
             })}
           </div>
 
-          {/* Selected plan preview */}
-          <div
-            className="mt-10 rounded-2xl p-4"
-            style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)" }}
-          >
-            <div className="text-[10px] uppercase tracking-widest text-brand-400 mb-1">Selected plan</div>
-            <div className="text-lg font-bold text-white">{plan.name}</div>
-            <div className="text-sm text-brand-300">{plan.price} {plan.period}</div>
-          </div>
+          {/* Selected plan preview (business only) */}
+          {isBiz && (
+            <div
+              className="mt-10 rounded-2xl p-4"
+              style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)" }}
+            >
+              <div className="text-[10px] uppercase tracking-widest text-brand-400 mb-1">Selected plan</div>
+              <div className="text-lg font-bold text-white">{plan.name}</div>
+              <div className="text-sm text-brand-300">{plan.price} {plan.period}</div>
+            </div>
+          )}
         </div>
 
         <p className="text-[11px] text-slate-600">
@@ -255,16 +396,39 @@ export default function RegisterPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-xs font-bold text-white">W</div>
             <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">WorkStream</span>
           </Link>
-          <span className="text-xs text-zinc-400">Step {step} of 4</span>
+          <span className="text-xs text-zinc-400">Step {step} of {maxStep}</span>
         </div>
 
         <div className="w-full max-w-lg">
+          {/* Account type toggle — shown only on step 1 */}
+          {step === 1 && (
+            <div className="mb-6">
+              <p className="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">I want to sign up as</p>
+              <div className="flex rounded-xl border border-zinc-200 p-1 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => { setAccountType("BUSINESS"); setStep(1); setError(null); }}
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${accountType === "BUSINESS" ? "bg-brand-600 text-white shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"}`}
+                >
+                  A business / org
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAccountType("AGENT"); setStep(1); setError(null); }}
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${accountType === "AGENT" ? "bg-brand-600 text-white shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"}`}
+                >
+                  An agent / freelancer
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Step heading */}
           <div className="mb-8">
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">
-              Step {step} of 4
+              Step {step} of {maxStep}
             </div>
-            <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">{STEP_LABELS[step - 1]}</h2>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">{stepLabels[step - 1]}</h2>
           </div>
 
           {/* ── STEP 1: Account ── */}
@@ -311,8 +475,8 @@ export default function RegisterPage() {
             </div>
           )}
 
-          {/* ── STEP 2: Business ── */}
-          {step === 2 && (
+          {/* ── STEP 2 (Business only): Business details ── */}
+          {isBiz && step === 2 && (
             <div className="space-y-4">
               <div className="mb-2 rounded-xl bg-brand-50 px-4 py-3 text-xs text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
                 You&apos;re setting up your remote operations workspace. WorkStream lets you post jobs, assign tasks with SLA timers, run QA reviews, track live performance, and pay out earnings — all from one dashboard.
@@ -363,8 +527,8 @@ export default function RegisterPage() {
             </div>
           )}
 
-          {/* ── STEP 3: Plan ── */}
-          {step === 3 && (
+          {/* ── STEP 3 (Business only): Plan ── */}
+          {isBiz && step === 3 && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {PLANS.map((p) => (
                 <button
@@ -407,39 +571,50 @@ export default function RegisterPage() {
             </div>
           )}
 
-          {/* ── STEP 4: Review ── */}
-          {step === 4 && (
+          {/* ── Review step (step 4 for biz, step 2 for agent) ── */}
+          {isReview && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-400">Account</div>
                 <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{account.firstName} {account.lastName}</div>
                 <div className="text-sm text-zinc-500">{account.email}</div>
                 <div className="text-sm text-zinc-500">{account.phone}</div>
-              </div>
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-400">Business</div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{business.companyName}</div>
-                <div className="text-xs text-zinc-400">{business.industry} · {business.teamSize} agents · {business.agentHiringModel}</div>
-                <div className="mt-1 text-sm text-zinc-500">{business.description}</div>
-              </div>
-              <div className="rounded-2xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-700 dark:bg-zinc-900">
-                <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">Plan</div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{plan.name}</span>
-                  <span className="text-lg font-bold text-brand-600 dark:text-brand-400">{plan.price}</span>
-                  <span className="text-xs text-zinc-400">{plan.period}</span>
+                <div className="mt-1.5">
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${isBiz ? "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"}`}>
+                    {isBiz ? "Business account" : "Agent account"}
+                  </span>
                 </div>
-                <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-                      <svg className="h-3 w-3 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
               </div>
+
+              {isBiz && (
+                <>
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-400">Business</div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{business.companyName}</div>
+                    <div className="text-xs text-zinc-400">{business.industry} · {business.teamSize} agents · {business.agentHiringModel}</div>
+                    <div className="mt-1 text-sm text-zinc-500">{business.description}</div>
+                  </div>
+
+                  <div className="rounded-2xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-700 dark:bg-zinc-900">
+                    <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">Plan</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{plan.name}</span>
+                      <span className="text-lg font-bold text-brand-600 dark:text-brand-400">{plan.price}</span>
+                      <span className="text-xs text-zinc-400">{plan.period}</span>
+                    </div>
+                    <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                      {plan.features.map((f) => (
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                          <svg className="h-3 w-3 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2.5 rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-300">
@@ -468,7 +643,7 @@ export default function RegisterPage() {
                 Back
               </button>
             )}
-            {step < 4 ? (
+            {!isReview ? (
               <button
                 type="button"
                 onClick={next}
@@ -486,10 +661,10 @@ export default function RegisterPage() {
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Launching workspace…
+                    {isBiz ? "Launching workspace…" : "Creating account…"}
                   </span>
                 ) : (
-                  "Launch my workspace 🚀"
+                  isBiz ? "Launch my workspace 🚀" : "Join WorkStream 🚀"
                 )}
               </button>
             )}
