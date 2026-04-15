@@ -422,9 +422,23 @@ export default function RegisterPage() {
                 <div className="text-xs text-zinc-400">{business.industry} · {business.teamSize} agents · {business.agentHiringModel}</div>
                 <div className="mt-1 text-sm text-zinc-500">{business.description}</div>
               </div>
-              <div className="rounded-2xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-800 dark:bg-brand-950/20">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">Plan</div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{plan.name} — {plan.price}{plan.period}</div>
+              <div className="rounded-2xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-700 dark:bg-zinc-900">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">Plan</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{plan.name}</span>
+                  <span className="text-lg font-bold text-brand-600 dark:text-brand-400">{plan.price}</span>
+                  <span className="text-xs text-zinc-400">{plan.period}</span>
+                </div>
+                <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      <svg className="h-3 w-3 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
               </div>
 
               {error && (
