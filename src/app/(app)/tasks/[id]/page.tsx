@@ -160,7 +160,7 @@ export default function TaskDetailPage() {
   if (!task) return <EmptyState title="Task not found" message="This task does not exist or was deleted." />;
 
   const statusToneMap: Record<TaskStatus, "default" | "info" | "warning" | "success" | "danger"> = {
-    PENDING: "default", ASSIGNED: "info", IN_PROGRESS: "warning", COMPLETED: "success", FAILED: "danger", CANCELLED: "default",
+    PENDING: "default", ASSIGNED: "info", IN_PROGRESS: "warning", UNDER_REVIEW: "info", COMPLETED: "success", FAILED: "danger", CANCELLED: "default", ON_HOLD: "warning",
   };
 
   return (
