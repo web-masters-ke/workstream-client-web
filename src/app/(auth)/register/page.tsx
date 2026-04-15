@@ -171,13 +171,20 @@ export default function RegisterPage() {
         { email: account.email, phone: account.phone, password: account.password, firstName: account.firstName, lastName: account.lastName, role: accountType }
       );
 
+      // Set token so subsequent API calls (like /businesses) are authenticated
+      setAuthToken(res.accessToken);
+
       if (isBiz) {
         try {
-          await apiPost("/businesses", { name: business.companyName, industry: business.industry, description: business.description, website: business.website || undefined, contactEmail: business.contactEmail, contactPhone: business.contactPhone, country: business.country || undefined, teamSize: business.teamSize, agentHiringModel: business.agentHiringModel, plan: selectedPlan });
+          const slug = business.companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          await apiPost("/businesses", { name: business.companyName, slug, industry: business.industry, description: business.description, website: business.website || undefined, contactEmail: business.contactEmail, contactPhone: business.contactPhone, country: business.country || undefined, teamSize: business.teamSize, agentHiringModel: business.agentHiringModel, plan: selectedPlan });
+          // Auto-create a default workspace for the business
+          try { await apiPost("/workspaces", { name: business.companyName, timezone: "Africa/Nairobi", currency: "KES" }); } catch { /* best effort */ }
         } catch { /* best effort */ }
       }
 
-      // Save token temporarily, send OTP, show OTP screen
+      // Save token in state for OTP phase, then clear localStorage
+      // (we don't want the user auto-logged-in until they verify OTP or skip)
       setSavedToken(res.accessToken);
       setSavedUser(res.user);
       if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
@@ -191,7 +198,12 @@ export default function RegisterPage() {
       const e = err as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } }; message?: string };
       const msg = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message ?? "Registration failed";
       const is409 = e.response?.status === 409 || /exist|duplicate|already/i.test(msg);
-      setError(is409 ? "§CONFLICT§" : msg);
+      if (is409) {
+        const isPhone = /phone/i.test(msg);
+        setError(isPhone ? "§CONFLICT_PHONE§" : "§CONFLICT_EMAIL§");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -621,10 +633,14 @@ export default function RegisterPage() {
                   <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  {error === "§CONFLICT§" ? (
+                  {error === "§CONFLICT_EMAIL§" ? (
                     <span>
-                      An account with this email already exists.{" "}
+                      That email address is already registered.{" "}
                       <Link href="/login" className="font-semibold underline">Sign in instead</Link>
+                    </span>
+                  ) : error === "§CONFLICT_PHONE§" ? (
+                    <span>
+                      That phone number is already registered. Please use a different number.
                     </span>
                   ) : error}
                 </div>

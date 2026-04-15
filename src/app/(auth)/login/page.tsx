@@ -155,7 +155,7 @@ export default function LoginPage() {
           {/* Dev hint */}
           <div className="mb-5 rounded-lg bg-zinc-100 px-3.5 py-2.5 text-[11px] text-zinc-500 dark:bg-zinc-900 dark:text-zinc-500">
             <span className="font-semibold text-zinc-700 dark:text-zinc-400">Seed login:</span>{" "}
-            <span className="font-mono">owner@acme.com</span> / <span className="font-mono">Password123!</span>
+            <span className="font-mono">alice@acmebpo.co.ke</span> / <span className="font-mono">Password123!</span>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5" noValidate>
