@@ -77,8 +77,9 @@ export type TaskStatus = "PENDING" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | 
 
 export interface Task {
   id: UUID;
-  jobId: UUID;
+  jobId?: UUID;
   jobTitle?: string;
+  businessId?: UUID;
   title: string;
   description?: string;
   status: TaskStatus;
@@ -191,6 +192,7 @@ export interface ChatMessage {
 export interface Conversation {
   id: UUID;
   title: string;
+  type?: "DIRECT" | "GROUP";
   taskId?: UUID;
   participants: { id: UUID; name: string; role?: string }[];
   lastMessage?: string;
@@ -246,12 +248,23 @@ export interface Escalation {
 
 export interface CallSession {
   id: UUID;
-  taskId?: UUID;
-  participants: string[];
-  direction: "INBOUND" | "OUTBOUND";
-  durationSeconds: number;
-  status: "COMPLETED" | "MISSED" | "FAILED";
-  startedAt: string;
+  conversationId?: UUID;
+  initiatorId: string;
+  type: "VOICE" | "VIDEO";
+  status: "INITIATED" | "RINGING" | "ONGOING" | "COMPLETED" | "MISSED" | "FAILED";
+  startedAt?: string;
+  endedAt?: string;
+  scheduledAt?: string;
+  durationSec?: number;
+  recordingUrl?: string;
+  meetingUrl?: string;
+  roomName?: string;
+  meetingTitle?: string;
+  participantIds?: string;
+  recurrenceRule?: string;
+  recurrenceParentId?: string;
+  meetingPassword?: string;
+  createdAt: string;
 }
 
 export interface ApiKey {
@@ -290,4 +303,27 @@ export interface Paginated<T> {
   total: number;
   page: number;
   limit: number;
+}
+
+export type SubmissionRound = 'FIRST_DRAFT' | 'SECOND_DRAFT' | 'FINAL';
+export type SubmissionType = 'FILE' | 'LINK' | 'TEXT' | 'OTHER';
+export type SubmissionStatus = 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REVISION_REQUESTED' | 'REJECTED';
+
+export interface TaskSubmission {
+  id: UUID;
+  taskId: UUID;
+  agentId: UUID;
+  agentName?: string;
+  round: SubmissionRound;
+  type: SubmissionType;
+  content?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  notes?: string;
+  status: SubmissionStatus;
+  reviewNote?: string;
+  submittedAt: string;
+  reviewedAt?: string;
 }

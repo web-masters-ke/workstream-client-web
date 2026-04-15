@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, PageHeader, Select } from "@/components/ui";
 import { DataTable, Column } from "@/components/DataTable";
-import { apiGet } from "@/lib/api";
+import { apiGet, extractItems } from "@/lib/api";
 import type { Job, JobStatus } from "@/lib/types";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { exportRowsAsCsv } from "@/lib/export";
@@ -22,7 +22,7 @@ export default function JobsPage() {
     setError(null);
     try {
       const data = await apiGet<Job[]>("/jobs");
-      setJobs(Array.isArray(data) ? data : []);
+      setJobs(extractItems<Job>(data));
     } catch (e: unknown) {
       setJobs([]);
       setError(e instanceof Error ? e.message : "Failed to load jobs");

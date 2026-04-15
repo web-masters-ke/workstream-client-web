@@ -33,13 +33,20 @@ export function disconnectSocket() {
   }
 }
 
+export type PresenceStatus = "ONLINE" | "AWAY" | "OFFLINE";
+
 export type RealtimeEvent =
   | { type: "task.created"; payload: { taskId: string; jobId: string } }
   | { type: "task.assigned"; payload: { taskId: string; agentId: string } }
   | { type: "task.status_changed"; payload: { taskId: string; status: string } }
   | { type: "task.message"; payload: { taskId: string; messageId: string; body?: string; senderName?: string } }
+  | { type: "conversation.message"; payload: { conversationId: string; messageId: string; body: string; senderName: string; senderId: string; taskId?: string | null } }
+  | { type: "conversation.created"; payload: { conversationId: string; title: string; taskId?: string | null } }
+  | { type: "conversation.typing"; payload: { conversationId: string; senderId: string; senderName: string; isTyping: boolean } }
   | { type: "sla.breach"; payload: { taskId: string; jobId?: string } }
-  | { type: "agent.presence"; payload: { agentId: string; status: string } };
+  | { type: "agent.presence"; payload: { agentId: string; status: string } }
+  | { type: "user.presence"; payload: { userId: string; status: PresenceStatus } }
+  | { type: "presence.snapshot"; payload: { users: Array<{ userId: string; status: string }> } };
 
 export function onRealtime(handler: (event: RealtimeEvent) => void): () => void {
   const s = getSocket();
@@ -48,4 +55,10 @@ export function onRealtime(handler: (event: RealtimeEvent) => void): () => void 
   return () => {
     s.off("event", fn);
   };
+}
+
+/** Join the authenticated user's notification room so real-time events are received */
+export function subscribeToUserRoom(userId: string) {
+  const s = getSocket();
+  s.emit("subscribe", userId);
 }

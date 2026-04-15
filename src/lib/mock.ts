@@ -105,8 +105,8 @@ export const mockEscalations: Escalation[] = [
 ];
 
 export const mockCalls: CallSession[] = [
-  { id: "call-1", taskId: "t-2", participants: ["Brenda Owino", "Customer 1043"], direction: "OUTBOUND", durationSeconds: 312, status: "COMPLETED", startedAt: "2026-04-13T09:00:00Z" },
-  { id: "call-2", taskId: "t-6", participants: ["Diana Mwangi", "Customer D-118"], direction: "OUTBOUND", durationSeconds: 0, status: "MISSED", startedAt: "2026-04-13T09:30:00Z" },
+  { id: "call-1", initiatorId: "user-1", type: "VIDEO", status: "COMPLETED", durationSec: 312, startedAt: "2026-04-13T09:00:00Z", meetingTitle: "Customer sync", createdAt: "2026-04-13T09:00:00Z" },
+  { id: "call-2", initiatorId: "user-2", type: "VIDEO", status: "MISSED", startedAt: "2026-04-13T09:30:00Z", meetingTitle: "Follow-up call", createdAt: "2026-04-13T09:30:00Z" },
 ];
 
 export const mockApiKeys: ApiKey[] = [

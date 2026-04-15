@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Badge, Button, Card, ErrorState, Input, Label, LoadingState, PageHeader, Select, Textarea } from "@/components/ui";
-import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPatch, apiDelete, extractItems } from "@/lib/api";
 import type { ApiKey, Webhook } from "@/lib/types";
 import { fmtRelative } from "@/lib/format";
 
@@ -64,8 +64,8 @@ export default function SettingsPage() {
           setDefaultSla(settings.defaultSlaMinutes ?? 60);
           setEscalationRules(settings.escalationRules ?? escalationRules);
         }
-        setApiKeys(Array.isArray(keys) ? keys : []);
-        setWebhooks(Array.isArray(whs) ? whs : []);
+        setApiKeys(extractItems<ApiKey>(keys));
+        setWebhooks(extractItems<Webhook>(whs));
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to load settings");
       } finally {

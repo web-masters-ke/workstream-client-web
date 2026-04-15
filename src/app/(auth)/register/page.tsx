@@ -20,6 +20,14 @@ const INDUSTRIES = [
 
 const PLANS = [
   {
+    id: "free",
+    name: "Free",
+    price: "KES 0",
+    period: "/ month",
+    features: ["Up to 2 agents", "25 tasks/month", "Basic task tracking", "Community support"],
+    highlight: false,
+  },
+  {
     id: "starter",
     name: "Starter",
     price: "KES 2,999",
@@ -139,9 +147,10 @@ export default function RegisterPage() {
       if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
       setDone(true);
     } catch (err) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      const msg = e.response?.data?.message ?? e.message ?? "Registration failed";
-      setError(/exist|duplicate|already/i.test(msg) ? "An account with this email already exists." : msg);
+      const e = err as { response?: { status?: number; data?: { error?: { message?: string }; message?: string } }; message?: string };
+      const msg = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message ?? "Registration failed";
+      const is409 = e.response?.status === 409 || /exist|duplicate|already/i.test(msg);
+      setError(is409 ? "§CONFLICT§" : msg);
     } finally {
       setLoading(false);
     }
@@ -356,7 +365,7 @@ export default function RegisterPage() {
 
           {/* ── STEP 3: Plan ── */}
           {step === 3 && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {PLANS.map((p) => (
                 <button
                   key={p.id}
@@ -423,7 +432,12 @@ export default function RegisterPage() {
                   <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  {error}
+                  {error === "§CONFLICT§" ? (
+                    <span>
+                      An account with this email already exists.{" "}
+                      <Link href="/login" className="font-semibold underline">Sign in instead</Link>
+                    </span>
+                  ) : error}
                 </div>
               )}
             </div>

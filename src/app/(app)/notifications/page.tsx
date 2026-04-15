@@ -29,22 +29,23 @@ function groupByDate(items: Notification[]): { label: string; items: Notificatio
     .map(([label, items]) => ({ label, items }));
 }
 
-function typeIcon(type: string) {
-  if (type.includes("TASK") || type.includes("task")) {
+function typeIcon(type: string | undefined) {
+  const t = type ?? "";
+  if (t.includes("TASK") || t.includes("task") || t.includes("Task") || t.includes("Escalat") || t.includes("escalat")) {
     return (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
       </svg>
     );
   }
-  if (type.includes("PAY") || type.includes("WALLET") || type.includes("INVOICE")) {
+  if (t.includes("PAY") || t.includes("WALLET") || t.includes("INVOICE") || t.includes("pay") || t.includes("wallet")) {
     return (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
       </svg>
     );
   }
-  if (type.includes("MESSAGE") || type.includes("CHAT")) {
+  if (t.includes("MESSAGE") || t.includes("CHAT") || t.includes("message") || t.includes("chat")) {
     return (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -58,8 +59,8 @@ function typeIcon(type: string) {
   );
 }
 
-function typeCategory(type: string): "TASK" | "PAYMENT" | "SYSTEM" | "OTHER" {
-  const t = type.toUpperCase();
+function typeCategory(type: string | undefined): "TASK" | "PAYMENT" | "SYSTEM" | "OTHER" {
+  const t = (type ?? "").toUpperCase();
   if (t.includes("TASK") || t.includes("MESSAGE") || t.includes("CHAT")) return "TASK";
   if (t.includes("PAY") || t.includes("WALLET") || t.includes("INVOICE")) return "PAYMENT";
   if (t.includes("SYSTEM") || t.includes("ALERT")) return "SYSTEM";
@@ -97,24 +98,27 @@ export default function NotificationsPage() {
     (async () => {
       setLoading(true);
       try {
-        // Try paginated endpoint first, fall back to simple
+        const mapN = (n: any): Notification => ({
+          ...n,
+          type: n.type ?? n.channel ?? n.title ?? "",
+          read: n.read ?? (n.readAt != null),
+        });
+        // Always use JWT-auth endpoint so we get the right user's notifications
+        const data = await apiGet<{ items: Notification[]; total: number } | Notification[]>(
+          "/notifications?page=1&limit=50",
+        );
         let res: Notification[] = [];
-        try {
-          const userId = JSON.parse(localStorage.getItem("ws-user") ?? "{}").id ?? "";
-          const data = await apiGet<{ items: Notification[]; total: number } | Notification[]>(
-            userId ? `/notifications/user/${userId}?page=1&limit=20` : "/notifications?page=1&limit=20",
-          );
-          if (Array.isArray(data)) {
-            res = data;
-            setHasMore(false);
-          } else if ("items" in data) {
-            res = data.items;
-            setHasMore(data.total > 20);
-          }
-        } catch {
-          res = ctxItems;
+        if (Array.isArray(data)) {
+          res = data.map(mapN);
+          setHasMore(false);
+        } else if (data && "items" in data) {
+          res = data.items.map(mapN);
+          setHasMore((data as any).total > 50);
         }
         if (!cancelled) setItems(res);
+      } catch {
+        // fall back to context items so real-time notifications still show
+        if (!cancelled) setItems(ctxItems);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -127,13 +131,17 @@ export default function NotificationsPage() {
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const userId = JSON.parse(localStorage.getItem("ws-user") ?? "{}").id ?? "";
       const data = await apiGet<{ items: Notification[]; total: number }>(
-        userId ? `/notifications/user/${userId}?page=${nextPage}&limit=20` : `/notifications?page=${nextPage}&limit=20`,
+        `/notifications?page=${nextPage}&limit=50`,
       );
-      setItems((prev) => [...prev, ...data.items]);
+      const mapN = (n: any): Notification => ({
+        ...n,
+        type: n.type ?? n.channel ?? n.title ?? "",
+        read: n.read ?? (n.readAt != null),
+      });
+      setItems((prev) => [...prev, ...data.items.map(mapN)]);
       setPage(nextPage);
-      setHasMore((page + 1) * 20 < data.total);
+      setHasMore((page + 1) * 50 < data.total);
     } catch { /* ignore */ }
     finally { setLoadingMore(false); }
   };
@@ -144,9 +152,13 @@ export default function NotificationsPage() {
     try { await apiPatch(`/notifications/${n.id}/read`, {}); } catch { /* stub */ }
   };
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     markAllRead();
     setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      const userId = (JSON.parse(localStorage.getItem("ws-user") ?? "{}") as any).id ?? "";
+      if (userId) await apiPatch(`/notifications/user/${userId}/read-all`, {});
+    } catch { /* best-effort */ }
   };
 
   const tabItems = useMemo(() => {

@@ -38,6 +38,13 @@ api.interceptors.response.use(
   },
 );
 
+/** Extract items array from either a plain array or a paginated { items, total } response */
+export function extractItems<T>(response: T[] | { items: T[] } | any): T[] {
+  if (Array.isArray(response)) return response;
+  if (response && typeof response === "object" && Array.isArray(response.items)) return response.items;
+  return [];
+}
+
 export function unwrap<T>(envelope: ApiEnvelope<T> | T): T {
   if (envelope && typeof envelope === "object" && "success" in (envelope as object) && "data" in (envelope as object)) {
     return (envelope as ApiEnvelope<T>).data;

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, ErrorState, Input, LoadingState, PageHeader } from "@/components/ui";
 import { StatCard } from "@/components/StatCard";
 import { LineTrend, BarCompare, DonutBreakdown, LineSeries } from "@/components/Charts";
-import { apiGet } from "@/lib/api";
+import { apiGet, extractItems } from "@/lib/api";
 import { exportRowsAsCsv } from "@/lib/export";
 import { fmtMoney } from "@/lib/format";
 import type { Agent, Job, Task } from "@/lib/types";
@@ -44,9 +44,15 @@ export default function ReportsPage() {
         apiGet<Task[]>("/tasks").catch(() => [] as Task[]),
       ]);
       setAnalytics(an ?? {});
-      setJobs(Array.isArray(j) ? j : []);
-      setAgents(Array.isArray(ag) ? ag : []);
-      setTasks(Array.isArray(t) ? t : []);
+      setJobs(extractItems<Job>(j));
+      setAgents(extractItems<any>(ag).map((a: any) => ({
+        ...a,
+        name: a.user?.name ?? a.name,
+        status: a.availability === "ONLINE" ? "ONLINE" : a.availability === "BUSY" ? "BUSY" : "OFFLINE",
+        skills: a.skills?.map((s: any) => s.skill ?? s) ?? [],
+        rating: Number(a.rating ?? 0),
+      })));
+      setTasks(extractItems<Task>(t));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load reports");
     } finally {

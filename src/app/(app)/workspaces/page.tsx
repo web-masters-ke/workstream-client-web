@@ -2,7 +2,7 @@
 
 import { useEffect, useState, FormEvent } from "react";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Label, LoadingState, PageHeader, Select } from "@/components/ui";
-import { WORKSPACE_KEY, apiGet, apiPost, apiPatch } from "@/lib/api";
+import { WORKSPACE_KEY, apiGet, apiPost, apiPatch, extractItems } from "@/lib/api";
 import type { Workspace } from "@/lib/types";
 import { fmtDate } from "@/lib/format";
 
@@ -29,10 +29,11 @@ export default function WorkspacesPage() {
     setLoading(true);
     try {
       const data = await apiGet<Workspace[]>("/workspaces");
-      setWorkspaces(Array.isArray(data) ? data : []);
+      const workspaceArr = extractItems<Workspace>(data);
+      setWorkspaces(workspaceArr);
       const saved = typeof window !== "undefined" ? localStorage.getItem(WORKSPACE_KEY) : null;
       if (saved) setActive(saved);
-      else if (Array.isArray(data) && data.length > 0) setActive(data[0].id);
+      else if (workspaceArr.length > 0) setActive(workspaceArr[0].id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load workspaces");
     } finally {

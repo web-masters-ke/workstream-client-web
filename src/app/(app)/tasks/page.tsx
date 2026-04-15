@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, PageHeader, Select } from "@/components/ui";
 import { TaskCard } from "@/components/TaskCard";
 import { DataTable, Column } from "@/components/DataTable";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { Agent, Task, TaskStatus } from "@/lib/types";
 import { onRealtime } from "@/lib/socket";
 import { fmtRelative } from "@/lib/format";
@@ -34,16 +34,34 @@ export default function TasksPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAgent, setBulkAgent] = useState("");
 
+  // ── New task modal ──
+  const [showNew, setShowNew] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPriority, setNewPriority] = useState("MEDIUM");
+  const [newSla, setNewSla] = useState(60);
+  const [newDue, setNewDue] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+
   const load = async () => {
     setError(null);
     setLoading(true);
     try {
-      const [t, ag] = await Promise.all([
-        apiGet<Task[]>("/tasks"),
-        apiGet<Agent[]>("/agents").catch(() => [] as Agent[]),
+      const [rawT, rawAg] = await Promise.all([
+        apiGet<Task[] | { items: any[] }>("/tasks"),
+        apiGet<Agent[] | { items: Agent[] }>("/agents").catch(() => [] as Agent[]),
       ]);
-      setTasks(Array.isArray(t) ? t : []);
-      setAgents(Array.isArray(ag) ? ag : []);
+      const tItems = Array.isArray(rawT) ? rawT : ((rawT as any)?.items ?? []);
+      const agItems = Array.isArray(rawAg) ? rawAg : ((rawAg as any)?.items ?? []);
+      // map nested assignments → flat assignedAgentId / assignedAgentName
+      const mappedTasks: Task[] = tItems.map((task: any) => ({
+        ...task,
+        assignedAgentId: task.assignments?.[0]?.agent?.id ?? task.assignedAgentId,
+        assignedAgentName: task.assignments?.[0]?.agent?.user?.name ?? task.assignedAgentName,
+      }));
+      setTasks(mappedTasks);
+      setAgents(agItems);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load tasks");
     } finally {
@@ -106,6 +124,47 @@ export default function TasksPage() {
     setSelected(new Set());
   };
 
+  const openNew = () => {
+    setNewTitle(""); setNewDesc(""); setNewPriority("MEDIUM"); setNewSla(60); setNewDue(""); setCreateErr(null);
+    setShowNew(true);
+  };
+
+  const handleCreate = async () => {
+    if (!newTitle.trim()) { setCreateErr("Title is required"); return; }
+    setCreating(true); setCreateErr(null);
+    try {
+      // get businessId from existing tasks, else fetch from /businesses
+      let businessId: string | undefined = tasks[0]?.businessId;
+      if (!businessId) {
+        const biz = await apiGet<{ id: string }[]>("/businesses").catch(() => []);
+        businessId = Array.isArray(biz) ? biz[0]?.id : (biz as any)?.items?.[0]?.id;
+      }
+      if (!businessId) throw new Error("No business found. Check you are logged in as a business owner.");
+      const created = await apiPost<Task>("/tasks", {
+        businessId,
+        title: newTitle.trim(),
+        description: newDesc.trim() || undefined,
+        priority: newPriority,
+        slaMinutes: newSla,
+        dueAt: newDue || undefined,
+      });
+      setTasks((prev) => [created, ...prev]);
+      setShowNew(false);
+    } catch (e: unknown) {
+      setCreateErr(e instanceof Error ? e.message : "Failed to create task");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this task?")) return;
+    try {
+      await apiDelete(`/tasks/${id}`);
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+    } catch { /* ignore */ }
+  };
+
   const exportCsv = () => {
     exportRowsAsCsv(
       "tasks",
@@ -145,6 +204,18 @@ export default function TasksPage() {
     { key: "sla", header: "SLA", cell: (t) => `${t.slaMinutes}m` },
     { key: "failed", header: "Failed reason", cell: (t) => t.failedReason || "—" },
     { key: "created", header: "Created", cell: (t) => fmtRelative(t.createdAt) },
+    {
+      key: "actions",
+      header: "",
+      cell: (t) => (
+        <button
+          onClick={() => handleDelete(t.id)}
+          className="rounded px-2 py-1 text-[11px] text-red-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
+        >
+          Delete
+        </button>
+      ),
+    },
   ];
 
   if (loading) return <LoadingState />;
@@ -152,11 +223,71 @@ export default function TasksPage() {
 
   return (
     <div>
+      {/* ── New task modal ── */}
+      {showNew && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
+            <h2 className="mb-4 text-base font-semibold text-zinc-900 dark:text-zinc-50">New task</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Title *</label>
+                <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Task title" autoFocus />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Description</label>
+                <textarea
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  rows={3}
+                  placeholder="Optional instructions..."
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Priority</label>
+                  <Select value={newPriority} onChange={(e) => setNewPriority(e.target.value)}>
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">SLA (min)</label>
+                  <Input type="number" min={5} value={newSla} onChange={(e) => setNewSla(Number(e.target.value))} />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Due date</label>
+                <div className="relative">
+                  <input
+                    type="datetime-local"
+                    value={newDue}
+                    onChange={(e) => setNewDue(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 pr-10 text-sm text-zinc-900 outline-none [color-scheme:light] focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:[color-scheme:dark]"
+                  />
+                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 dark:text-zinc-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </div>
+              </div>
+              {createErr && <p className="text-xs text-red-600">{createErr}</p>}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowNew(false)}>Cancel</Button>
+              <Button size="sm" disabled={creating} onClick={handleCreate}>{creating ? "Creating…" : "Create task"}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PageHeader
         title="Task board"
         subtitle="Live view of all tasks in this workspace."
         action={
           <div className="flex gap-2">
+            <Button size="sm" onClick={openNew}>+ New task</Button>
             <Button variant={view === "kanban" ? "primary" : "outline"} size="sm" onClick={() => setView("kanban")}>Kanban</Button>
             <Button variant={view === "list" ? "primary" : "outline"} size="sm" onClick={() => setView("list")}>List</Button>
             <Button variant="outline" size="sm" onClick={exportCsv}>Export CSV</Button>

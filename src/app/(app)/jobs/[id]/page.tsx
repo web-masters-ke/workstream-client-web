@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, PageHeader, Select, Textarea } from "@/components/ui";
 import { DataTable, Column } from "@/components/DataTable";
 import { StatCard } from "@/components/StatCard";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, extractItems } from "@/lib/api";
 import type { Job, Task, TaskStatus, ActivityEvent, Agent } from "@/lib/types";
 import { fmtDate, fmtMoney, fmtRelative } from "@/lib/format";
 
@@ -61,12 +61,18 @@ export default function JobDetailPage() {
           apiGet<Agent[]>("/agents").catch(() => [] as Agent[]),
         ]);
         setJob(j);
-        setTasks(Array.isArray(t) ? t : []);
-        setAgents(Array.isArray(ag) ? ag : []);
+        setTasks(extractItems<Task>(t));
+        setAgents(extractItems<any>(ag).map((a: any) => ({
+          ...a,
+          name: a.user?.name ?? a.name,
+          status: a.availability === "ONLINE" ? "ONLINE" : a.availability === "BUSY" ? "BUSY" : "OFFLINE",
+          skills: a.skills?.map((s: any) => s.skill ?? s) ?? [],
+          rating: Number(a.rating ?? 0),
+        })));
         // Activity is best-effort
         try {
           const ev = await apiGet<ActivityEvent[]>(`/jobs/${id}/activity`);
-          setActivity(Array.isArray(ev) ? ev : []);
+          setActivity(extractItems<ActivityEvent>(ev));
         } catch {
           setActivity([]);
         }

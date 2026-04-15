@@ -5,7 +5,7 @@ import Link from "next/link";
 import { PageHeader, Card, Badge, Button, ErrorState, LoadingState } from "@/components/ui";
 import { StatCard } from "@/components/StatCard";
 import { LineTrend, DonutBreakdown, BarCompare } from "@/components/Charts";
-import { apiGet } from "@/lib/api";
+import { apiGet, extractItems } from "@/lib/api";
 import type { Task, Agent, Job } from "@/lib/types";
 import { fmtRelative, fmtMoney } from "@/lib/format";
 
@@ -39,9 +39,15 @@ export default function OverviewPage() {
         apiGet<Agent[] | { items: Agent[] }>("/agents?limit=50").catch(() => [] as Agent[]),
         apiGet<Job[] | { items: Job[] }>("/jobs?limit=50").catch(() => [] as Job[]),
       ]);
-      const taskArr  = Array.isArray(t) ? t : (t as any)?.items ?? [];
-      const agentArr = Array.isArray(a) ? a : (a as any)?.items ?? [];
-      const jobArr   = Array.isArray(j) ? j : (j as any)?.items ?? [];
+      const taskArr  = extractItems<Task>(t);
+      const agentArr = extractItems<any>(a).map((a: any) => ({
+        ...a,
+        name: a.user?.name ?? a.name,
+        status: a.availability === "ONLINE" ? "ONLINE" : a.availability === "BUSY" ? "BUSY" : "OFFLINE",
+        skills: a.skills?.map((s: any) => s.skill ?? s) ?? [],
+        rating: Number(a.rating ?? 0),
+      }));
+      const jobArr   = extractItems<Job>(j);
       setTasks(taskArr);
       setAgents(agentArr);
       setJobs(jobArr);

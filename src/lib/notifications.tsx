@@ -3,7 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Notification } from "./types";
 import { apiGet } from "./api";
-import { onRealtime } from "./socket";
+import { onRealtime, subscribeToUserRoom } from "./socket";
 
 interface NotificationsCtx {
   items: Notification[];
@@ -22,12 +22,29 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await apiGet<Notification[]>("/notifications");
-        if (!cancelled && Array.isArray(res)) setItems(res);
+        // Backend returns { items: [...], total: N } inside the data envelope
+        const res = await apiGet<{ items: unknown[]; total: number } | unknown[]>("/notifications");
+        if (cancelled) return;
+        const raw: unknown[] = Array.isArray(res) ? res : (res as any)?.items ?? [];
+        const mapped: Notification[] = raw.map((n: any) => ({
+          id: n.id ?? "",
+          type: n.type ?? n.channel ?? "",
+          title: n.title ?? "",
+          body: n.body ?? undefined,
+          link: n.link ?? undefined,
+          read: n.read ?? (n.readAt != null),
+          createdAt: n.createdAt ?? new Date().toISOString(),
+        }));
+        setItems(mapped);
       } catch {
         // No mock fallback — start with empty list; real-time events will populate it
       }
     })();
+    // Subscribe to user-specific room so real-time events arrive
+    try {
+      const u = JSON.parse(localStorage.getItem("ws-user") ?? "{}");
+      if (u?.id) subscribeToUserRoom(u.id);
+    } catch { /* noop */ }
     return () => {
       cancelled = true;
     };

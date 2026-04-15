@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Label, LoadingState, PageHeader, Select } from "@/components/ui";
 import { AgentCard } from "@/components/AgentCard";
 import { BarCompare } from "@/components/Charts";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, extractItems } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
 export default function AgentsPage() {
@@ -28,7 +28,18 @@ export default function AgentsPage() {
     setLoading(true);
     try {
       const data = await apiGet<Agent[]>("/agents");
-      setAgents(Array.isArray(data) ? data : []);
+      setAgents(extractItems<any>(data).map((a: any) => ({
+        ...a,
+        name: a.user?.name ?? a.name ?? a.user?.email ?? "Unknown",
+        email: a.user?.email ?? a.email ?? "",
+        status: a.availability === "ONLINE" ? "ONLINE" : a.availability === "BUSY" ? "BUSY" : "OFFLINE",
+        skills: a.skills?.map((s: any) => s.skill ?? s) ?? [],
+        rating: Number(a.rating ?? 0),
+        completedTasks: a.completedTasks ?? 0,
+        activeTasks: a.activeTasks ?? 0,
+        successRate: Number(a.successRate ?? 0),
+        avgHandleTimeMinutes: a.avgHandleTimeMinutes ?? 0,
+      })));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load agents");
     } finally {
@@ -42,7 +53,7 @@ export default function AgentsPage() {
 
   const filtered = useMemo(() => {
     return agents.filter((a) => {
-      if (q && !a.name.toLowerCase().includes(q.toLowerCase()) && !a.skills.some((s) => s.toLowerCase().includes(q.toLowerCase()))) return false;
+      if (q && !(a.name ?? "").toLowerCase().includes(q.toLowerCase()) && !a.skills.some((s) => s.toLowerCase().includes(q.toLowerCase()))) return false;
       if (statusFilter && a.status !== statusFilter) return false;
       return true;
     });
@@ -59,16 +70,16 @@ export default function AgentsPage() {
     if (!inviteEmail.trim()) return;
     try {
       await apiPost("/agents/invite", {
-        email: inviteEmail,
-        phone: invitePhone || undefined,
+        email: inviteEmail.trim(),
         firstName: inviteFirstName || undefined,
         lastName: inviteLastName || undefined,
+        phone: invitePhone || undefined,
         skills: inviteSkills.split(",").map((s) => s.trim()).filter(Boolean),
-        hourlyRate: inviteRate ? Number(inviteRate) : undefined,
-        contractType: inviteContractType,
+        hourlyRateCents: inviteRate ? Math.round(Number(inviteRate) * 100) : undefined,
         personalMessage: inviteMessage || undefined,
       });
-    } catch { /* stub */ }
+      await load();
+    } catch { /* email taken or other error — still close */ }
     setShowInvite(false);
     setInviteEmail("");
     setInvitePhone("");
@@ -82,10 +93,10 @@ export default function AgentsPage() {
   const perfData = useMemo(
     () =>
       agents.slice(0, 5).map((a) => ({
-        label: a.name.split(" ")[0],
-        successRate: Math.round(a.successRate * 100),
-        rating: a.rating * 20,
-        avgTime: a.avgHandleTimeMinutes ?? 15,
+        label: (a.name ?? "Unknown").split(" ")[0],
+        successRate: Math.round((a.successRate ?? 0) * 100),
+        rating: Math.round((a.rating ?? 0) * 20),
+        avgTime: a.avgHandleTimeMinutes ?? 0,
       })),
     [agents],
   );

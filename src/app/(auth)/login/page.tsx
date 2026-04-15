@@ -9,14 +9,14 @@ interface LoginResponse {
   accessToken?: string;
   token?: string;
   refreshToken?: string;
-  user?: { id: string; email: string; name: string };
+  user?: { id: string; email: string; name: string; role?: string };
 }
 
 function getErrMsg(err: unknown): string {
   if (!err || typeof err !== "object") return "Login failed. Please try again.";
-  const e = err as { response?: { data?: { message?: string }; status?: number }; message?: string };
+  const e = err as { response?: { data?: { error?: { message?: string }; message?: string }; status?: number }; message?: string };
   const status = e.response?.status;
-  const msg = e.response?.data?.message ?? e.message ?? "";
+  const msg = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message ?? "";
   if (status === 401 || /invalid.*credential|wrong.*password|incorrect/i.test(msg)) return "Invalid email or password.";
   if (status === 403 && /suspend/i.test(msg)) return "Your account has been suspended. Contact support.";
   if (status === 429) return "Too many attempts. Please wait a few minutes and try again.";
@@ -48,7 +48,10 @@ export default function LoginPage() {
       localStorage.setItem(TOKEN_KEY, token);
       if (res.refreshToken) localStorage.setItem("ws-refresh-token", res.refreshToken);
       if (res.user) localStorage.setItem("ws-user", JSON.stringify(res.user));
-      router.push("/dashboard");
+      // Agents go to their task list; everyone else to the dashboard
+      const role = res.user?.role ?? "";
+      router.push(role === "AGENT" ? "/tasks" : "/dashboard");
+
     } catch (err) {
       setError(getErrMsg(err));
     } finally {
@@ -145,7 +148,7 @@ export default function LoginPage() {
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Welcome back</h2>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Sign in to manage your agents, jobs, and payouts.
+              Sign in to your WorkStream account.
             </p>
           </div>
 
@@ -241,10 +244,13 @@ export default function LoginPage() {
           </form>
 
           <p className="mt-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            Don&apos;t have an account?{" "}
+            Running a business?{" "}
             <Link href="/register" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
               Set up your workspace
             </Link>
+          </p>
+          <p className="mt-2 text-center text-xs text-zinc-400 dark:text-zinc-600">
+            Agents — use the login credentials sent to your email.
           </p>
 
           <p className="mt-6 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
