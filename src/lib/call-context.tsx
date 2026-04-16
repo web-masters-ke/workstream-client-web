@@ -158,6 +158,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       },
     });
 
+    // Patch iframe permissions — ensure camera/microphone/display-capture are allowed
+    requestAnimationFrame(() => {
+      const iframe = mountEl.querySelector("iframe");
+      if (iframe) {
+        iframe.setAttribute("allow", "camera *; microphone *; display-capture *; autoplay *; clipboard-write *; fullscreen *");
+        iframe.setAttribute("allowfullscreen", "true");
+      }
+    });
+
     api.addEventListener("participantJoined", () => setParticipants((p) => p + 1));
     api.addEventListener("participantLeft", () => setParticipants((p) => Math.max(1, p - 1)));
     api.addEventListener("videoConferenceJoined", () => {
