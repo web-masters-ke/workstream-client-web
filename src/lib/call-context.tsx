@@ -119,73 +119,40 @@ export function CallProvider({ children }: { children: ReactNode }) {
     endingRef.current = false;
   }, []);
 
+  const meetingWindowRef = useRef<Window | null>(null);
+
   const initJitsi = useCallback((roomName: string, token: string, password?: string) => {
-    const mountEl = mountElRef.current ?? getOrCreateJitsiRoot();
-    if (!window.JitsiMeetExternalAPI) return;
-
-    if (jitsiApiRef.current) {
-      try { jitsiApiRef.current.dispose(); } catch { /**/ }
-      jitsiApiRef.current = null;
+    // Close any existing meeting window
+    if (meetingWindowRef.current && !meetingWindowRef.current.closed) {
+      meetingWindowRef.current.focus();
+      return;
     }
-    mountEl.innerHTML = "";
 
-    // Use iframe API with permissions pre-set via MutationObserver
-    // Watch for iframe creation and patch allow attribute before it loads
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of Array.from(m.addedNodes)) {
-          if (node instanceof HTMLIFrameElement) {
-            node.allow = "camera *; microphone *; display-capture *; autoplay *; clipboard-write *; fullscreen *";
-            node.allowFullscreen = true;
-            observer.disconnect();
-          }
-        }
-      }
-    });
-    observer.observe(mountEl, { childList: true, subtree: true });
+    // Build the direct meeting URL with JWT token
+    const meetingUrl = `https://8x8.vc/${JAAS_APP_ID}/${roomName}?jwt=${token}`;
 
-    const api = new window.JitsiMeetExternalAPI("8x8.vc", {
-      roomName: `${JAAS_APP_ID}/${roomName}`,
-      jwt: token,
-      parentNode: mountEl,
-      width: "100%",
-      height: "100%",
-      configOverwrite: {
-        startWithAudioMuted: false,
-        startWithVideoMuted: false,
-        disableDeepLinking: true,
-        enableNoisyMicDetection: false,
-        enableNoAudioDetection: false,
-        prejoinPageEnabled: false,
-        disableLobbyMode: true,
-        enableLobbyChat: false,
-      },
-      interfaceConfigOverwrite: {
-        SHOW_JITSI_WATERMARK: false,
-        SHOW_WATERMARK_FOR_GUESTS: false,
-        DEFAULT_BACKGROUND: "#0f172a",
-        TOOLBAR_BUTTONS: [
-          "microphone", "camera", "desktop", "fullscreen",
-          "fodeviceselection", "hangup", "profile", "chat",
-          "recording", "raisehand", "videoquality", "filmstrip",
-          "tileview", "videobackgroundblur", "settings",
-        ],
-      },
-    });
+    // Open in a popup window — full WebRTC support, no iframe issues
+    const w = 900;
+    const h = 700;
+    const left = Math.round((screen.width - w) / 2);
+    const top = Math.round((screen.height - h) / 2);
+    const popup = window.open(
+      meetingUrl,
+      "workstream-meeting",
+      `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no,location=no,status=no`,
+    );
 
-    // Safety: disconnect observer after 2 seconds if it hasn't fired
-    setTimeout(() => observer.disconnect(), 2000);
-
-    api.addEventListener("participantJoined", () => setParticipants((p) => p + 1));
-    api.addEventListener("participantLeft", () => setParticipants((p) => Math.max(1, p - 1)));
-    api.addEventListener("videoConferenceJoined", () => {
-      if (password) api.executeCommand("password", password);
-    });
-    api.addEventListener("videoConferenceLeft", () => endCall());
-    api.addEventListener("readyToClose", () => endCall());
-
-    jitsiApiRef.current = api;
+    meetingWindowRef.current = popup;
     setParticipants(1);
+
+    // Poll to detect when the popup is closed (user ends call)
+    const pollId = setInterval(() => {
+      if (!popup || popup.closed) {
+        clearInterval(pollId);
+        meetingWindowRef.current = null;
+        endCall();
+      }
+    }, 1000);
   }, [endCall]);
 
   return (
