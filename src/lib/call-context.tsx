@@ -129,6 +129,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
     mountEl.innerHTML = "";
 
+    // Use iframe API with permissions pre-set via MutationObserver
+    // Watch for iframe creation and patch allow attribute before it loads
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of Array.from(m.addedNodes)) {
+          if (node instanceof HTMLIFrameElement) {
+            node.allow = "camera *; microphone *; display-capture *; autoplay *; clipboard-write *; fullscreen *";
+            node.allowFullscreen = true;
+            observer.disconnect();
+          }
+        }
+      }
+    });
+    observer.observe(mountEl, { childList: true, subtree: true });
+
     const api = new window.JitsiMeetExternalAPI("8x8.vc", {
       roomName: `${JAAS_APP_ID}/${roomName}`,
       jwt: token,
@@ -158,14 +173,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    // Patch iframe permissions — ensure camera/microphone/display-capture are allowed
-    requestAnimationFrame(() => {
-      const iframe = mountEl.querySelector("iframe");
-      if (iframe) {
-        iframe.setAttribute("allow", "camera *; microphone *; display-capture *; autoplay *; clipboard-write *; fullscreen *");
-        iframe.setAttribute("allowfullscreen", "true");
-      }
-    });
+    // Safety: disconnect observer after 2 seconds if it hasn't fired
+    setTimeout(() => observer.disconnect(), 2000);
 
     api.addEventListener("participantJoined", () => setParticipants((p) => p + 1));
     api.addEventListener("participantLeft", () => setParticipants((p) => Math.max(1, p - 1)));
